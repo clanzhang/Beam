@@ -48,17 +48,27 @@
   }
 
   .upload-btn {
-    width: 100%; border: none; cursor: pointer;
+    position: relative; overflow: hidden;
+    display: block; width: 100%;
+    border: none; cursor: pointer;
     border-radius: 16px; padding: 22px 16px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #06121f; font-size: 17px; font-weight: 700;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    text-align: center;
     transition: transform .1s ease, opacity .2s;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+  }
+  .upload-btn .big { font-size: 30px; line-height: 1; display: block; margin-bottom: 6px; }
+  .upload-btn small { font-weight: 500; opacity: .75; font-size: 12px; display: block; margin-top: 6px; }
+  .upload-btn input[type="file"] {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    opacity: 0; cursor: pointer;
+    /* 个别浏览器点 label 不转发，直接让输入框铺满可点区域最保险 */
   }
   .upload-btn:active { transform: scale(.97); }
   .upload-btn.disabled { opacity: .5; pointer-events: none; }
-  .upload-btn .big { font-size: 30px; line-height: 1; }
-  .upload-btn small { font-weight: 500; opacity: .75; font-size: 12px; }
 
   .progress-wrap { margin-top: 14px; }
   .p-item { margin-bottom: 10px; }
@@ -121,12 +131,12 @@
   </header>
 
   <div class="card">
-    <button class="upload-btn" id="pick">
+    <label class="upload-btn" id="pick">
+      <input type="file" id="input" multiple>
       <span class="big">⇪</span>
       选择文件发送到电脑
       <small>支持多选 · 无大小限制</small>
-    </button>
-    <input type="file" id="input" multiple hidden>
+    </label>
     <div class="progress-wrap" id="progress" hidden></div>
   </div>
 
@@ -250,7 +260,13 @@
     });
   }
 
-  pick.addEventListener('click', function () { if (!uploading) input.click(); });
+  pick.addEventListener('click', function (e) {
+    if (uploading) {
+      // 上传中禁止再次选择
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
   input.addEventListener('change', function () {
     if (input.files.length) upload(input.files);
     input.value = '';
