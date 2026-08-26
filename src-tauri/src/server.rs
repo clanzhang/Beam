@@ -23,6 +23,18 @@ const MAX_FILENAME_LEN: usize = 200;
 pub struct ServerState {
     pub token: String,
     pub dir: RwLock<PathBuf>,
+    pub log_path: Option<PathBuf>,
+}
+
+/// 写一行访问日志：同时输出到 stderr 和日志文件（便于排查手机端问题）
+fn log_line(st: &ServerState, line: &str) {
+    eprintln!("[airbox] {line}");
+    if let Some(p) = &st.log_path {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{line}");
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -68,6 +80,13 @@ async fn gateway_inner(st: &Arc<ServerState>, token: String, rest: &str, req: Re
     if token != st.token {
         return (StatusCode::NOT_FOUND, "Not Found").into_response();
     }
+    let ua = req
+        .headers()
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-")
+        .to_string();
+    log_line(st, &format!("REQ {} {} UA={}", req.method(), req.uri(), ua));
     match (req.method().clone(), rest) {
         (Method::GET, "api/files") => list_files(st).await,
         (Method::POST, "api/upload") => upload_file(st, req).await,
@@ -140,6 +159,7 @@ async fn upload_file(st: &Arc<ServerState>, req: Request) -> Response {
 
     let mut saved: u32 = 0;
     let mut errors: u32 = 0;
+    let mut saved_names: Vec<String> = Vec::new();
 
     while let Ok(Some(mut field)) = multipart.next_field().await {
         let Some(raw_name) = field.file_name().map(|s| s.to_string()) else {
@@ -168,7 +188,10 @@ async fn upload_file(st: &Arc<ServerState>, req: Request) -> Response {
         .await;
 
         match result {
-            Ok(()) => saved += 1,
+            Ok(()) => {
+                saved += 1;
+                saved_names.push(name.clone());
+            }
             Err(e) => {
                 eprintln!("[airbox] 保存 {name} 失败: {e}");
                 let _ = tokio::fs::remove_file(&tmp_path).await;
@@ -177,6 +200,10 @@ async fn upload_file(st: &Arc<ServerState>, req: Request) -> Response {
         }
     }
 
+    log_line(
+        st,
+        &format!("UPLOAD ok={saved} err={errors} names={}", saved_names.join(",")),
+    );
     (StatusCode::OK, JsonOk(json!({ "ok": true, "saved": saved, "errors": errors }))).into_response()
 }
 
@@ -313,6 +340,7 @@ mod tests {
         Arc::new(ServerState {
             token: "testtok123".to_string(),
             dir: RwLock::new(dir.to_path_buf()),
+            log_path: None,
         })
     }
 

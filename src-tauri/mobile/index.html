@@ -48,7 +48,6 @@
   }
 
   .upload-btn {
-    position: relative; overflow: hidden;
     display: block; width: 100%;
     border: none; cursor: pointer;
     border-radius: 16px; padding: 22px 16px;
@@ -61,11 +60,11 @@
   }
   .upload-btn .big { font-size: 30px; line-height: 1; display: block; margin-bottom: 6px; }
   .upload-btn small { font-weight: 500; opacity: .75; font-size: 12px; display: block; margin-top: 6px; }
-  .upload-btn input[type="file"] {
-    position: absolute; inset: 0;
-    width: 100%; height: 100%;
-    opacity: 0; cursor: pointer;
-    /* 个别浏览器点 label 不转发，直接让输入框铺满可点区域最保险 */
+  /* 输入框视觉隐藏（sr-only），不用 display:none（微信不认），不覆盖按钮（避免 iOS 选择后 change 为空） */
+  .sr-file-input {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0 0 0 0); border: 0; opacity: 0;
   }
   .upload-btn:active { transform: scale(.97); }
   .upload-btn.disabled { opacity: .5; pointer-events: none; }
@@ -132,11 +131,11 @@
 
   <div class="card">
     <label class="upload-btn" id="pick" for="input">
-      <input type="file" id="input" multiple>
       <span class="big">⇪</span>
       选择文件发送到电脑
       <small id="pickHint">支持多选 · 无大小限制</small>
     </label>
+    <input type="file" id="input" class="sr-file-input" multiple>
     <div class="progress-wrap" id="progress" hidden></div>
   </div>
 
@@ -164,11 +163,17 @@
   var API = 'api';
 
   // 微信内置浏览器：multiple 多选照片有已知 bug（点一张就退出选择器），降级为单选
+  // 且微信 iOS 需要 accept 属性才能从相册正常返回照片
   if (/MicroMessenger/i.test(navigator.userAgent)) {
     input.removeAttribute('multiple');
+    input.setAttribute('accept', 'image/*,video/*');
     var hint = $('pickHint');
-    if (hint) hint.textContent = '微信内一次选一张 · 可连续发送';
+    if (hint) hint.textContent = '微信内一次选一张照片/视频 · 可连续发送';
   }
+
+  window.addEventListener('error', function (e) {
+    toast('页面错误: ' + (e.message || '未知'));
+  });
 
   function fmtSize(n) {
     if (n == null) return '-';
@@ -253,14 +258,17 @@
         if (uploading <= 0) pick.classList.remove('disabled');
         if (xhr.status === 200) {
           item.classList.add('done'); bar.style.width = '100%'; pct.textContent = '完成';
+          toast('已发送到电脑');
           load();
         } else {
-          item.classList.add('fail'); pct.textContent = '失败';
+          item.classList.add('fail'); pct.textContent = '失败(' + xhr.status + ')';
+          toast('上传失败(' + xhr.status + ')，请重试');
         }
       };
       xhr.onerror = function () {
         uploading--; if (uploading <= 0) pick.classList.remove('disabled');
         item.classList.add('fail'); pct.textContent = '网络错误';
+        toast('上传失败：网络错误');
       };
       uploading++;
       xhr.send(fd);
@@ -275,7 +283,13 @@
     }
   });
   input.addEventListener('change', function () {
-    if (input.files.length) upload(input.files);
+    var n = input.files ? input.files.length : 0;
+    if (n > 0) {
+      toast('已选择 ' + n + ' 个文件，开始上传…');
+      upload(input.files);
+    } else {
+      toast('未获取到文件，请重试');
+    }
     input.value = '';
   });
   $('refresh').addEventListener('click', load);

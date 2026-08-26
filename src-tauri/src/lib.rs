@@ -81,6 +81,7 @@ pub fn run() {
             let server = Arc::new(ServerState {
                 token,
                 dir: RwLock::new(dir),
+                log_path: Some(app_config_dir.join("access.log")),
             });
             let router = build_router(server.clone());
 
