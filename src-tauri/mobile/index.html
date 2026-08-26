@@ -131,11 +131,11 @@
   </header>
 
   <div class="card">
-    <label class="upload-btn" id="pick">
+    <label class="upload-btn" id="pick" for="input">
       <input type="file" id="input" multiple>
       <span class="big">⇪</span>
       选择文件发送到电脑
-      <small>支持多选 · 无大小限制</small>
+      <small id="pickHint">支持多选 · 无大小限制</small>
     </label>
     <div class="progress-wrap" id="progress" hidden></div>
   </div>
@@ -162,6 +162,13 @@
   var empty = $('empty'), countEl = $('count');
   var uploading = 0, files = [];
   var API = 'api';
+
+  // 微信内置浏览器：multiple 多选照片有已知 bug（点一张就退出选择器），降级为单选
+  if (/MicroMessenger/i.test(navigator.userAgent)) {
+    input.removeAttribute('multiple');
+    var hint = $('pickHint');
+    if (hint) hint.textContent = '微信内一次选一张 · 可连续发送';
+  }
 
   function fmtSize(n) {
     if (n == null) return '-';
