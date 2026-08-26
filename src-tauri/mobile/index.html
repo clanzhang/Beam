@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b1220">
+<title>AirBox 快传</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --card: #121b2e;
+    --card-2: #17233a;
+    --line: #223048;
+    --text: #e2e8f0;
+    --muted: #8fa3bd;
+    --accent: #22d3ee;
+    --accent-2: #6366f1;
+    --danger: #f87171;
+    --ok: #34d399;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: radial-gradient(1200px 500px at 50% -10%, #16233f 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+    padding: env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px);
+  }
+  header { display: flex; align-items: center; gap: 12px; padding: 18px 2px 4px; }
+  .logo {
+    width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center;
+    font-size: 22px; font-weight: 800; color: #06121f;
+    box-shadow: 0 6px 20px rgba(34, 211, 238, .25);
+  }
+  .title { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 5px; box-shadow: 0 0 8px var(--ok); }
+
+  .card {
+    background: linear-gradient(180deg, var(--card), var(--card-2));
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 18px;
+    margin-top: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+
+  .upload-btn {
+    width: 100%; border: none; cursor: pointer;
+    border-radius: 16px; padding: 22px 16px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #06121f; font-size: 17px; font-weight: 700;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    transition: transform .1s ease, opacity .2s;
+  }
+  .upload-btn:active { transform: scale(.97); }
+  .upload-btn.disabled { opacity: .5; pointer-events: none; }
+  .upload-btn .big { font-size: 30px; line-height: 1; }
+  .upload-btn small { font-weight: 500; opacity: .75; font-size: 12px; }
+
+  .progress-wrap { margin-top: 14px; }
+  .p-item { margin-bottom: 10px; }
+  .p-item .p-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .p-item .p-head b { color: var(--text); font-weight: 600; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .15s; }
+  .p-item.done .p-head { color: var(--ok); }
+  .p-item.done .bar > i { background: var(--ok); }
+  .p-item.fail .p-head { color: var(--danger); }
+  .p-item.fail .bar > i { background: var(--danger); }
+
+  .list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .list-head h3 { font-size: 15px; font-weight: 700; }
+  .list-head .count { font-size: 12px; color: var(--muted); }
+  .refresh {
+    background: var(--card-2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 10px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+  }
+  .refresh:active { opacity: .7; }
+
+  .file {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 2px; border-bottom: 1px solid rgba(255,255,255,.05);
+  }
+  .file:last-child { border-bottom: none; }
+  .file .icon { width: 38px; height: 38px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 18px; flex-shrink: 0; }
+  .file .meta { flex: 1; min-width: 0; }
+  .file .meta .name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file .meta .info { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .file .ops { display: flex; gap: 8px; }
+  .op-btn {
+    width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card-2); color: var(--text); font-size: 15px; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .op-btn.del { color: var(--danger); }
+  .op-btn:active { opacity: .7; }
+
+  .empty { text-align: center; padding: 26px 0 14px; color: var(--muted); font-size: 13.5px; }
+  .empty .em { font-size: 40px; margin-bottom: 8px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 30px);
+    transform: translateX(-50%); background: #1b2740; border: 1px solid var(--line);
+    color: var(--text); padding: 10px 18px; border-radius: 12px; font-size: 13px;
+    opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 99;
+    max-width: 80%; text-align: center;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">AB</div>
+    <div>
+      <div class="title">AirBox <span class="status-dot"></span></div>
+      <div class="sub">已连接到电脑 · 双向互传</div>
+    </div>
+  </header>
+
+  <div class="card">
+    <button class="upload-btn" id="pick">
+      <span class="big">⇪</span>
+      选择文件发送到电脑
+      <small>支持多选 · 无大小限制</small>
+    </button>
+    <input type="file" id="input" multiple hidden>
+    <div class="progress-wrap" id="progress" hidden></div>
+  </div>
+
+  <div class="card">
+    <div class="list-head">
+      <h3>电脑上的文件 <span class="count" id="count"></span></h3>
+      <button class="refresh" id="refresh">⟳ 刷新</button>
+    </div>
+    <div id="files"></div>
+    <div class="empty" id="empty" hidden>
+      <div class="em">📭</div>
+      还没有文件，先从电脑传一个过来吧
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var pick = $('pick'), input = $('input'), progress = $('progress'), listEl = $('files');
+  var empty = $('empty'), countEl = $('count');
+  var uploading = 0, files = [];
+  var API = 'api';
+
+  function fmtSize(n) {
+    if (n == null) return '-';
+    var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
+  }
+  function fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts * 1000);
+    function p(x) { return x < 10 ? '0' + x : x; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function iconFor(name) {
+    var ext = (name.split('.').pop() || '').toLowerCase();
+    var map = { jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', webp: '🖼️', heic: '🖼️',
+      mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬', mp3: '🎵', wav: '🎵', m4a: '🎵',
+      zip: '🗜️', rar: '🗜️', 7z: '🗜️', pdf: '📄', doc: '📝', docx: '📝', xls: '📊',
+      xlsx: '📊', ppt: '📽️', pptx: '📽️', txt: '📃', md: '📃' };
+    return map[ext] || '📦';
+  }
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._timer); t._timer = setTimeout(function () { t.classList.remove('show'); }, 2000);
+  }
+
+  function render() {
+    countEl.textContent = files.length ? files.length + ' 个 · ' + fmtSize(files.reduce(function (s, f) { return s + f.size; }, 0)) : '';
+    empty.hidden = files.length > 0;
+    listEl.innerHTML = '';
+    files.forEach(function (f) {
+      var row = document.createElement('div'); row.className = 'file';
+      row.innerHTML =
+        '<div class="icon">' + iconFor(f.name) + '</div>' +
+        '<div class="meta"><div class="name"></div><div class="info">' + fmtSize(f.size) + ' · ' + fmtTime(f.modified) + '</div></div>' +
+        '<div class="ops">' +
+        '<a class="op-btn" title="下载" href="' + API + '/files/' + encodeURIComponent(f.name) + '">⬇</a>' +
+        '<button class="op-btn del" title="删除" data-name="' + encodeURIComponent(f.name) + '">✕</button>' +
+        '</div>';
+      row.querySelector('.name').textContent = f.name;
+      row.querySelector('a').addEventListener('click', function () { toast('开始下载 ' + f.name); });
+      row.querySelector('.del').addEventListener('click', function () { removeFile(f.name); });
+      listEl.appendChild(row);
+    });
+  }
+
+  function load() {
+    fetch(API + '/files', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.files) { files = d.files; render(); } })
+      .catch(function () {});
+  }
+
+  function removeFile(name) {
+    if (!confirm('删除 ' + name + ' ？')) return;
+    fetch(API + '/files/' + encodeURIComponent(name), { method: 'DELETE' })
+      .then(function (r) { if (r.ok) { load(); toast('已删除'); } else { toast('删除失败'); } })
+      .catch(function () { toast('网络错误'); });
+  }
+
+  function upload(filesToSend) {
+    pick.classList.add('disabled');
+    progress.hidden = false;
+    progress.innerHTML = '';
+    Array.prototype.forEach.call(filesToSend, function (file, idx) {
+      var item = document.createElement('div'); item.className = 'p-item';
+      item.innerHTML = '<div class="p-head"><b>' + file.name + '</b><span>0%</span></div><div class="bar"><i></i></div>';
+      progress.appendChild(item);
+      var bar = item.querySelector('.bar > i'), pct = item.querySelector('.p-head span');
+
+      var fd = new FormData(); fd.append('file', file);
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', API + '/upload');
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) {
+          var p = Math.round(e.loaded / e.total * 100);
+          bar.style.width = p + '%'; pct.textContent = p + '%';
+        }
+      };
+      xhr.onload = function () {
+        uploading--;
+        if (uploading <= 0) pick.classList.remove('disabled');
+        if (xhr.status === 200) {
+          item.classList.add('done'); bar.style.width = '100%'; pct.textContent = '完成';
+          load();
+        } else {
+          item.classList.add('fail'); pct.textContent = '失败';
+        }
+      };
+      xhr.onerror = function () {
+        uploading--; if (uploading <= 0) pick.classList.remove('disabled');
+        item.classList.add('fail'); pct.textContent = '网络错误';
+      };
+      uploading++;
+      xhr.send(fd);
+    });
+  }
+
+  pick.addEventListener('click', function () { if (!uploading) input.click(); });
+  input.addEventListener('change', function () {
+    if (input.files.length) upload(input.files);
+    input.value = '';
+  });
+  $('refresh').addEventListener('click', load);
+  setInterval(load, 5000);
+  load();
+})();
+</script>
+</body>
+</html>
