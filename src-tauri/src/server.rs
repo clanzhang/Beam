@@ -3,7 +3,10 @@ use std::sync::{Arc, RwLock};
 use std::time::UNIX_EPOCH;
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Path as AxumPath, Request, State};
+use axum::extract::{
+    ws::{Message as WsMessage, WebSocket, WebSocketUpgrade},
+    DefaultBodyLimit, FromRequest, Multipart, Path as AxumPath, Request, State,
+};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
@@ -12,18 +15,21 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::Serialize;
 use serde_json::json;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use tower_http::cors::{Any, CorsLayer};
 
 const MAX_FILENAME_LEN: usize = 200;
 
-#[derive(Debug)]
 pub struct ServerState {
     pub token: String,
     pub dir: RwLock<PathBuf>,
     pub log_path: Option<PathBuf>,
+    /// 文件变化广播频道：上传/删除/导入/换目录时发送 "files_changed"，WebSocket 客户端据此即时刷新
+    pub notify: tokio::sync::broadcast::Sender<String>,
+    /// 新文件到达回调（用于发系统通知），None 时跳过
+    pub on_new_file: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 }
 
 /// 写一行访问日志：同时输出到 stderr 和日志文件（便于排查手机端问题）
@@ -90,6 +96,7 @@ async fn gateway_inner(st: &Arc<ServerState>, token: String, rest: &str, req: Re
     match (req.method().clone(), rest) {
         (Method::GET, "api/files") => list_files(st).await,
         (Method::POST, "api/upload") => upload_file(st, req).await,
+        (Method::GET, "api/ws") => ws_upgrade(st, req).await,
         (Method::GET, r) if r.starts_with("api/files/") => {
             download_file(st, &r["api/files/".len()..]).await
         }
@@ -112,6 +119,43 @@ fn mobile_page() -> Response {
         include_str!("../mobile/index.html"),
     )
         .into_response()
+}
+
+// ---------- WebSocket 实时推送 ----------
+
+async fn ws_upgrade(st: &Arc<ServerState>, req: Request) -> Response {
+    let st = st.clone();
+    match WebSocketUpgrade::from_request(req, &()).await {
+        Ok(upgrade) => upgrade.on_upgrade(move |socket| ws_loop(socket, st)),
+        Err(rej) => rej.into_response(),
+    }
+}
+
+async fn ws_loop(socket: WebSocket, st: Arc<ServerState>) {
+    let mut rx = st.notify.subscribe();
+    let (mut sender, mut receiver) = socket.split();
+    // 连接建立后先推一次，让客户端立刻同步
+    let _ = sender.send(WsMessage::Text("files_changed".to_string())).await;
+    loop {
+        tokio::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Ok(m) => {
+                        if sender.send(WsMessage::Text(m.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break, // Lagged/Closed
+                }
+            }
+            incoming = receiver.next() => {
+                match incoming {
+                    Some(Ok(_)) => {} // 忽略客户端消息（保活/心跳）
+                    _ => break,
+                }
+            }
+        }
+    }
 }
 
 // ---------- API ----------
@@ -203,6 +247,14 @@ async fn upload_file(st: &Arc<ServerState>, req: Request) -> Response {
         }
     }
 
+    if saved > 0 {
+        let _ = st.notify.send("files_changed".to_string());
+        if let Some(cb) = &st.on_new_file {
+            for n in &saved_names {
+                cb(n);
+            }
+        }
+    }
     log_line(
         st,
         &format!("UPLOAD ok={saved} err={errors} names={}", saved_names.join(",")),
@@ -227,7 +279,7 @@ async fn download_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
-        header::HeaderValue::from_static("application/octet-stream"),
+        header::HeaderValue::from_static(mime_for(&name)),
     );
     headers.insert(
         header::CONTENT_DISPOSITION,
@@ -251,7 +303,10 @@ async fn delete_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
     let dir = st.dir.read().unwrap().clone();
     let path = dir.join(&name);
     match tokio::fs::remove_file(&path).await {
-        Ok(()) => (StatusCode::OK, JsonOk(json!({ "ok": true }))).into_response(),
+        Ok(()) => {
+            let _ = st.notify.send("files_changed".to_string());
+            (StatusCode::OK, JsonOk(json!({ "ok": true }))).into_response()
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             (StatusCode::NOT_FOUND, JsonErr("文件不存在")).into_response()
         }
@@ -274,9 +329,34 @@ impl IntoResponse for JsonErr {
     }
 }
 
+/// 按扩展名返回 Content-Type（图片缩略图渲染需要正确类型）
+fn mime_for(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "heic" | "heif" => "image/heic",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "pdf" => "application/pdf",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        "zip" => "application/zip",
+        "json" => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
 /// 清洗文件名：拒绝空名/`.`/`..`/控制字符/超长/含路径分隔符，保证不能逃逸目录。
 /// 手机浏览器选择文件时不会带上路径分隔符，直接拒绝更安全。
-fn sanitize_filename(raw: &str) -> Option<String> {
+pub(crate) fn sanitize_filename(raw: &str) -> Option<String> {
     let base = raw.trim().to_string();
     if base.is_empty()
         || base == "."
@@ -291,7 +371,7 @@ fn sanitize_filename(raw: &str) -> Option<String> {
 }
 
 /// 重名自动追加 " (1)"、" (2)"...
-fn dedupe_path(path: &Path) -> PathBuf {
+pub(crate) fn dedupe_path(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or(Path::new("."));
     let file_stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let ext = path
@@ -340,10 +420,13 @@ mod tests {
     use tower::ServiceExt;
 
     pub(crate) fn test_state(dir: &Path) -> Arc<ServerState> {
+        let (tx, _rx) = tokio::sync::broadcast::channel(64);
         Arc::new(ServerState {
             token: "testtok123".to_string(),
             dir: RwLock::new(dir.to_path_buf()),
             log_path: None,
+            notify: tx,
+            on_new_file: None,
         })
     }
 
@@ -584,6 +667,52 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn upload_broadcasts_files_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let mut rx = state.notify.subscribe();
+        let router = build_router(state);
+        let resp = call(
+            router,
+            Method::POST,
+            "/t/testtok123/api/upload",
+            CT,
+            multipart_body(&[("a.txt", "hi")]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(rx.try_recv(), Ok("files_changed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn delete_broadcasts_files_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("gone.txt"), "bye").unwrap();
+        let state = test_state(dir.path());
+        let mut rx = state.notify.subscribe();
+        let router = build_router(state);
+        let resp = call(
+            router,
+            Method::DELETE,
+            "/t/testtok123/api/files/gone.txt",
+            &[],
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(rx.try_recv(), Ok("files_changed".to_string()));
+    }
+
+    #[test]
+    fn mime_for_common_types() {
+        assert_eq!(mime_for("a.jpg"), "image/jpeg");
+        assert_eq!(mime_for("a.PNG"), "image/png");
+        assert_eq!(mime_for("a.mp4"), "video/mp4");
+        assert_eq!(mime_for("a.pdf"), "application/pdf");
+        assert_eq!(mime_for("a.xyz"), "application/octet-stream");
     }
 
     #[test]

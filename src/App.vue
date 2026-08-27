@@ -2,10 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import QRCode from 'qrcode'
 import {
+  apiBase,
   deleteFile,
   formatSize,
   formatTime,
   getServerInfo,
+  importFiles,
   listFiles,
   openDir,
   pickDir,
@@ -21,6 +23,10 @@ const copied = ref(false)
 const picking = ref(false)
 const busy = ref(false)
 const refreshing = ref(false)
+const dragging = ref(false)
+
+let wsConn: WebSocket | null = null
+let unlistenDrag: (() => void) | undefined
 
 const totalSize = computed(() => files.value.reduce((s, f) => s + f.size, 0))
 const statusText = computed(() =>
@@ -52,7 +58,49 @@ async function init() {
   await refresh()
   const opts = { width: 230, margin: 1, color: { dark: '#0b1220ff', light: '#ffffffff' } }
   qrDataUrl.value = await QRCode.toDataURL(info.value.url, opts)
+  connectWs()
+  setupDragDrop()
   timer = window.setInterval(refresh, 5000)
+}
+
+/** WebSocket 实时推送：收到 files_changed 立即刷新（保留轮询作兜底） */
+function connectWs() {
+  if (!info.value || wsConn) return
+  const socket = new WebSocket(`ws://127.0.0.1:${info.value.port}/t/${info.value.token}/api/ws`)
+  socket.onmessage = () => refresh()
+  socket.onclose = () => {
+    wsConn = null
+    setTimeout(connectWs, 3000)
+  }
+  socket.onerror = () => socket.close()
+  wsConn = socket
+}
+
+/** 桌面拖拽发送：拖入文件 → 复制进共享目录 → 手机端实时可见 */
+async function setupDragDrop() {
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+  unlistenDrag = await getCurrentWebview().onDragDropEvent((event) => {
+    const t = event.payload.type
+    if (t === 'over' || t === 'enter') {
+      dragging.value = true
+    } else if (t === 'leave') {
+      dragging.value = false
+    } else if (t === 'drop') {
+      dragging.value = false
+      importFiles(event.payload.paths).then((n) => {
+        if (n > 0) refresh()
+      })
+    }
+  })
+}
+
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp']
+function isImage(name: string): boolean {
+  const ext = (name.split('.').pop() || '').toLowerCase()
+  return IMAGE_EXTS.includes(ext)
+}
+function thumbnailUrl(name: string): string {
+  return `${apiBase()}/api/files/${encodeURIComponent(name)}`
 }
 
 async function copyUrl() {
@@ -123,6 +171,8 @@ function fileIcon(name: string): string {
 onMounted(init)
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
+  unlistenDrag?.()
+  wsConn?.close()
 })
 </script>
 
@@ -238,7 +288,14 @@ onUnmounted(() => {
               class="group flex items-center gap-3 py-3 px-2 -mx-2 rounded-lg hover:bg-white/[0.03] transition-colors"
             >
               <div
-                class="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0"
+                v-if="isImage(f.name)"
+                class="w-10 h-10 rounded-lg overflow-hidden shrink-0 ring-1 ring-slate-700/70 bg-[#0a0f1d]"
+              >
+                <img :src="thumbnailUrl(f.name)" :alt="f.name" class="w-10 h-10 object-cover" loading="lazy" />
+              </div>
+              <div
+                v-else
+                class="w-10 h-10 rounded-lg grid place-items-center text-lg shrink-0"
                 :class="fileTint(f.name)"
               >
                 {{ fileIcon(f.name) }}
@@ -266,5 +323,16 @@ onUnmounted(() => {
       <span>文件保存在本地收件目录，不上传任何第三方服务器</span>
       <span>关闭 AirBox 即断开连接</span>
     </footer>
+
+    <!-- 拖拽发送遮罩 -->
+    <div v-if="dragging" class="fixed inset-0 z-50 pointer-events-none">
+      <div
+        class="absolute inset-4 rounded-2xl border-2 border-dashed border-amber-400/70 bg-amber-400/10 backdrop-blur-sm flex flex-col items-center justify-center gap-3"
+      >
+        <div class="text-4xl">📤</div>
+        <p class="text-lg font-semibold text-amber-300">松开鼠标，发送到共享目录</p>
+        <p class="text-xs text-slate-400">文件会复制进共享目录，手机端立即可见可下载</p>
+      </div>
+    </div>
   </div>
 </template>

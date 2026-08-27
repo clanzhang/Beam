@@ -7,6 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
 
 use server::{build_router, random_token, ServerState};
 
@@ -23,6 +24,33 @@ struct ServerInfo {
     port: u16,
     token: String,
     dir: String,
+}
+
+#[tauri::command]
+fn import_files(state: tauri::State<'_, AppState>, paths: Vec<String>) -> Result<u32, String> {
+    let dir = state.server.dir.read().unwrap().clone();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut imported: u32 = 0;
+    for p in &paths {
+        let src = PathBuf::from(p);
+        if !src.is_file() {
+            continue;
+        }
+        let Some(name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        let Some(safe) = server::sanitize_filename(&name) else {
+            continue;
+        };
+        let dest = server::dedupe_path(&dir.join(&safe));
+        if std::fs::copy(&src, &dest).is_ok() {
+            imported += 1;
+        }
+    }
+    if imported > 0 {
+        let _ = state.server.notify.send("files_changed".to_string());
+    }
+    Ok(imported)
 }
 
 #[tauri::command]
@@ -49,7 +77,9 @@ fn set_dir(
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     *state.server.dir.write().unwrap() = path.clone();
     let app_config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    config::save(&app_config_dir, &path)
+    config::save(&app_config_dir, &path)?;
+    let _ = state.server.notify.send("files_changed".to_string());
+    Ok(())
 }
 
 #[tauri::command]
@@ -67,6 +97,7 @@ fn open_dir(dir: String) -> Result<(), String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_config_dir = app.path().app_config_dir()?;
@@ -77,11 +108,28 @@ pub fn run() {
                 .map(PathBuf::from)
                 .unwrap_or(cfg.dir);
             let token = std::env::var("AIRBOX_TOKEN").unwrap_or_else(|_| random_token(8));
+            let handle = app.handle().clone();
 
             let server = Arc::new(ServerState {
                 token,
                 dir: RwLock::new(dir),
                 log_path: Some(app_config_dir.join("access.log")),
+                notify: {
+                    let (tx, _rx) = tokio::sync::broadcast::channel(64);
+                    tx
+                },
+                on_new_file: Some(Arc::new(move |name: &str| {
+                    let handle = handle.clone();
+                    let name = name.to_string();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = handle
+                            .notification()
+                            .builder()
+                            .title("AirBox")
+                            .body(format!("收到新文件：{name}"))
+                            .show();
+                    });
+                })),
             });
             let router = build_router(server.clone());
 
@@ -113,7 +161,12 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_server_info, set_dir, open_dir])
+        .invoke_handler(tauri::generate_handler![
+            get_server_info,
+            set_dir,
+            open_dir,
+            import_files
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

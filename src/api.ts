@@ -50,6 +50,11 @@ export async function openDir(dir: string): Promise<void> {
   await invoke('open_dir', { dir })
 }
 
+/** 桌面拖拽导入：把文件复制进共享目录，返回成功数 */
+export async function importFiles(paths: string[]): Promise<number> {
+  return await invoke<number>('import_files', { paths })
+}
+
 export function formatSize(n: number): string {
   if (n == null) return '-'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
