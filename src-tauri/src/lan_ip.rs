@@ -11,7 +11,7 @@ use std::net::IpAddr;
 pub fn best_lan_ip(interfaces: &[(String, IpAddr)]) -> Option<IpAddr> {
     let mut candidates: Vec<(IpAddr, u8)> = interfaces
         .iter()
-        .filter(|(name, ip)| ip.is_ipv4() && !ip.is_loopback())
+        .filter(|(_name, ip)| ip.is_ipv4() && !ip.is_loopback())
         .filter(|(name, _)| !is_virtual_iface(name))
         .map(|(name, ip)| (*ip, priority(name, ip)))
         .collect();
