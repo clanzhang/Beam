@@ -30,6 +30,7 @@ rand = "0.8"
 if-addrs = "0.13"
 urlencoding = "2"
 dirs = "5"
+arboard = "3"
 
 [dev-dependencies]
 tempfile = "3"

@@ -30,6 +30,10 @@ pub struct ServerState {
     pub notify: tokio::sync::broadcast::Sender<String>,
     /// 新文件到达回调（用于发系统通知），None 时跳过
     pub on_new_file: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// 文字互传：最近一条共享文本 (内容, 时间戳)
+    pub clipboard: RwLock<Option<(String, u64)>>,
+    /// 写入系统剪贴板的回调（手机发文字 → 电脑剪贴板）
+    pub on_clipboard: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 }
 
 /// 写一行访问日志：同时输出到 stderr 和日志文件（便于排查手机端问题）
@@ -97,8 +101,10 @@ async fn gateway_inner(st: &Arc<ServerState>, token: String, rest: &str, req: Re
         (Method::GET, "api/files") => list_files(st).await,
         (Method::POST, "api/upload") => upload_file(st, req).await,
         (Method::GET, "api/ws") => ws_upgrade(st, req).await,
+        (Method::GET, "api/clipboard") => get_clipboard(st).await,
+        (Method::POST, "api/clipboard") => set_clipboard(st, req).await,
         (Method::GET, r) if r.starts_with("api/files/") => {
-            download_file(st, &r["api/files/".len()..]).await
+            download_file(st, &r["api/files/".len()..], req).await
         }
         (Method::DELETE, r) if r.starts_with("api/files/") => {
             delete_file(st, &r["api/files/".len()..]).await
@@ -262,7 +268,7 @@ async fn upload_file(st: &Arc<ServerState>, req: Request) -> Response {
     (StatusCode::OK, JsonOk(json!({ "ok": true, "saved": saved, "errors": errors }))).into_response()
 }
 
-async fn download_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
+async fn download_file(st: &Arc<ServerState>, encoded_name: &str, req: Request) -> Response {
     let Some(name) = decode_name(encoded_name) else {
         return (StatusCode::BAD_REQUEST, JsonErr("非法文件名")).into_response();
     };
@@ -275,6 +281,47 @@ async fn download_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
         return (StatusCode::INTERNAL_SERVER_ERROR, JsonErr("打开文件失败")).into_response();
     };
     let size = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+
+    // Range 支持：断点续传 + 大视频可拖动进度条（206 Partial Content）
+    if let Some(range) = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some((start, end)) = parse_range(range, size) {
+            use tokio::io::{AsyncReadExt, AsyncSeekExt};
+            let mut file = file;
+            if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                return (StatusCode::INTERNAL_SERVER_ERROR, JsonErr("读取失败")).into_response();
+            }
+            let length = end - start + 1;
+            let stream = ReaderStream::new(file.take(length));
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(mime_for(&name)),
+            );
+            headers.insert(
+                header::CONTENT_LENGTH,
+                header::HeaderValue::from_str(&length.to_string()).unwrap(),
+            );
+            headers.insert(
+                header::CONTENT_RANGE,
+                header::HeaderValue::from_str(&format!("bytes {start}-{end}/{size}")).unwrap(),
+            );
+            headers.insert(header::ACCEPT_RANGES, header::HeaderValue::from_static("bytes"));
+            return (StatusCode::PARTIAL_CONTENT, headers, Body::from_stream(stream)).into_response();
+        } else {
+            // 区间不合法 → 416
+            return (
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                [(header::CONTENT_RANGE, format!("bytes */{size}"))],
+                "Range Not Satisfiable",
+            )
+                .into_response();
+        }
+    }
+
     let stream = ReaderStream::new(file);
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -293,7 +340,67 @@ async fn download_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
         header::CONTENT_LENGTH,
         header::HeaderValue::from_str(&size.to_string()).unwrap(),
     );
+    headers.insert(header::ACCEPT_RANGES, header::HeaderValue::from_static("bytes"));
     (headers, Body::from_stream(stream)).into_response()
+}
+
+/// 解析 Range 头：bytes=start-end / bytes=start- / bytes=-suffix。非法时返回 None（→ 416）
+fn parse_range(range: &str, len: u64) -> Option<(u64, u64)> {
+    let spec = range.strip_prefix("bytes=")?;
+    let (s, e) = spec.split_once('-')?;
+    if s.is_empty() {
+        // bytes=-N：最后 N 个字节，end 固定为 len-1
+        let n: u64 = e.parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        let start = len.saturating_sub(n);
+        if start >= len {
+            return None;
+        }
+        return Some((start, len - 1));
+    }
+    let start: u64 = s.parse().ok()?;
+    let end: u64 = if e.is_empty() {
+        len.saturating_sub(1)
+    } else {
+        e.parse::<u64>().ok()?.min(len.saturating_sub(1))
+    };
+    if start >= len || start > end {
+        return None;
+    }
+    Some((start, end))
+}
+
+// ---------- 文字互传 ----------
+
+async fn get_clipboard(st: &Arc<ServerState>) -> Response {
+    let c = st.clipboard.read().unwrap();
+    match &*c {
+        Some((text, ts)) => (StatusCode::OK, JsonOk(json!({ "text": text, "updated_at": ts }))).into_response(),
+        None => (StatusCode::OK, JsonOk(json!({ "text": "", "updated_at": 0 }))).into_response(),
+    }
+}
+
+async fn set_clipboard(st: &Arc<ServerState>, req: Request) -> Response {
+    let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::BAD_REQUEST, JsonErr("请求体过大")).into_response(),
+    };
+    let text = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+        .unwrap_or_default();
+    let ts = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    *st.clipboard.write().unwrap() = Some((text.clone(), ts));
+    if let Some(cb) = &st.on_clipboard {
+        cb(&text);
+    }
+    let _ = st.notify.send("clipboard_changed".to_string());
+    (StatusCode::OK, JsonOk(json!({ "ok": true }))).into_response()
 }
 
 async fn delete_file(st: &Arc<ServerState>, encoded_name: &str) -> Response {
@@ -427,6 +534,8 @@ mod tests {
             log_path: None,
             notify: tx,
             on_new_file: None,
+            clipboard: RwLock::new(None),
+            on_clipboard: None,
         })
     }
 
@@ -704,6 +813,94 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(rx.try_recv(), Ok("files_changed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn range_download_returns_partial_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"0123456789"; // 10 字节
+        std::fs::write(dir.path().join("big.bin"), content).unwrap();
+        let router = build_router(test_state(dir.path()));
+        let resp = call(
+            router.clone(),
+            Method::GET,
+            "/t/testtok123/api/files/big.bin",
+            &[("range", "bytes=2-5")],
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()),
+            Some("bytes 2-5/10")
+        );
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&bytes[..], b"2345");
+
+        // 后缀区间 bytes=-3 → 最后 3 字节
+        let resp = call(
+            router.clone(),
+            Method::GET,
+            "/t/testtok123/api/files/big.bin",
+            &[("range", "bytes=-3")],
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&bytes[..], b"789");
+
+        // 超界 → 416
+        let resp = call(
+            router,
+            Method::GET,
+            "/t/testtok123/api/files/big.bin",
+            &[("range", "bytes=50-60")],
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    #[tokio::test]
+    async fn clipboard_set_and_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let mut rx = state.notify.subscribe();
+        let router = build_router(state);
+        // 设置
+        let resp = call(
+            router.clone(),
+            Method::POST,
+            "/t/testtok123/api/clipboard",
+            &[("content-type", "application/json")],
+            Body::from(r#"{"text":"你好，AirBox"}"#),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(rx.try_recv(), Ok("clipboard_changed".to_string()));
+        // 读取
+        let resp = call(
+            router,
+            Method::GET,
+            "/t/testtok123/api/clipboard",
+            &[],
+            Body::empty(),
+        )
+        .await;
+        let text = body_text(resp).await;
+        assert!(text.contains("你好，AirBox"), "{text}");
+    }
+
+    #[test]
+    fn parse_range_variants() {
+        assert_eq!(parse_range("bytes=2-5", 10), Some((2, 5)));
+        assert_eq!(parse_range("bytes=5-", 10), Some((5, 9)));
+        assert_eq!(parse_range("bytes=-3", 10), Some((7, 9)));
+        assert_eq!(parse_range("bytes=0-999", 10), Some((0, 9)));
+        assert_eq!(parse_range("bytes=50-60", 10), None);
+        assert_eq!(parse_range("bytes=5-2", 10), None);
+        assert_eq!(parse_range("items=0-1", 10), None);
     }
 
     #[test]

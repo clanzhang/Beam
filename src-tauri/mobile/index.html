@@ -96,6 +96,8 @@
   }
   .file:last-child { border-bottom: none; }
   .file .icon { width: 38px; height: 38px; border-radius: 10px; background: var(--card-2); display: grid; place-items: center; font-size: 18px; flex-shrink: 0; }
+  .file .icon.img { padding: 0; overflow: hidden; }
+  .file .icon.img img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; }
   .file .meta { flex: 1; min-width: 0; }
   .file .meta .name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .file .meta .info { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
@@ -119,6 +121,22 @@
     max-width: 80%; text-align: center;
   }
   .toast.show { opacity: 1; }
+
+  /* 文字互传 */
+  .clip-input { width: 100%; background: var(--card-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--text); font-size: 14px; resize: none; min-height: 72px; outline: none; }
+  .clip-input:focus { border-color: var(--accent); }
+  .btn { display: block; width: 100%; border: none; cursor: pointer; border-radius: 12px; padding: 13px 20px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #06121f; font-weight: 700; font-size: 14px; text-align: center; margin-top: 10px; }
+  .btn:active { transform: scale(.97); }
+  .btn.ghost { background: var(--card-2); color: var(--muted); border: 1px solid var(--line); margin-top: 0; padding: 8px 14px; font-weight: 600; width: auto; }
+  .clip-box { margin-top: 12px; background: var(--card-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .clip-box p { font-size: 13px; line-height: 1.6; color: var(--text); word-break: break-all; white-space: pre-wrap; max-height: 130px; overflow-y: auto; margin-bottom: 8px; }
+  .clip-box .row { display: flex; justify-content: flex-end; }
+
+  /* 图片大图预览 */
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; z-index: 200; opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .lightbox.show { opacity: 1; pointer-events: auto; }
+  .lightbox img { max-width: 94%; max-height: 88%; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+  .lightbox .close { position: absolute; top: calc(env(safe-area-inset-top) + 14px); right: 18px; width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; font-size: 18px; border: none; display: grid; place-items: center; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -150,6 +168,23 @@
       <div class="em">📭</div>
       还没有文件，先从电脑传一个过来吧
     </div>
+  </div>
+
+  <div class="card">
+    <div class="list-head">
+      <h3>📋 文字互传</h3>
+    </div>
+    <textarea class="clip-input" id="clipInput" placeholder="输入或粘贴文字，发送到电脑剪贴板…"></textarea>
+    <button class="btn" id="clipSend">发送到电脑</button>
+    <div class="clip-box" id="clipBox" hidden>
+      <p id="clipText"></p>
+      <div class="row"><button class="btn ghost" id="clipCopy">复制</button></div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox">
+    <button class="close" id="lbClose">✕</button>
+    <img id="lbImg" alt="预览">
   </div>
 
   <div class="toast" id="toast"></div>
@@ -186,6 +221,12 @@
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
     return (i === 0 ? n : n.toFixed(1)) + ' ' + u[i];
   }
+  function fmtSpeed(bps) {
+    if (!bps || bps <= 0) return '';
+    var u = ['B/s', 'KB/s', 'MB/s', 'GB/s'], i = 0;
+    while (bps >= 1024 && i < u.length - 1) { bps /= 1024; i++; }
+    return (i === 0 ? Math.round(bps) : bps.toFixed(1)) + ' ' + u[i];
+  }
   function fmtTime(ts) {
     if (!ts) return '';
     var d = new Date(ts * 1000);
@@ -211,19 +252,34 @@
     listEl.innerHTML = '';
     files.forEach(function (f) {
       var row = document.createElement('div'); row.className = 'file';
+      var isImg = /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(f.name);
+      var iconHtml = isImg
+        ? '<div class="icon img"><img class="thumb" loading="lazy" src="' + API + '/files/' + encodeURIComponent(f.name) + '" alt=""></div>'
+        : '<div class="icon">' + iconFor(f.name) + '</div>';
       row.innerHTML =
-        '<div class="icon">' + iconFor(f.name) + '</div>' +
+        iconHtml +
         '<div class="meta"><div class="name"></div><div class="info">' + fmtSize(f.size) + ' · ' + fmtTime(f.modified) + '</div></div>' +
         '<div class="ops">' +
         '<a class="op-btn" title="下载" href="' + API + '/files/' + encodeURIComponent(f.name) + '">⬇</a>' +
         '<button class="op-btn del" title="删除" data-name="' + encodeURIComponent(f.name) + '">✕</button>' +
         '</div>';
       row.querySelector('.name').textContent = f.name;
+      var thumb = row.querySelector('.thumb');
+      if (thumb) thumb.addEventListener('click', function () { preview(f.name); });
       row.querySelector('a').addEventListener('click', function () { toast('开始下载 ' + f.name); });
       row.querySelector('.del').addEventListener('click', function () { removeFile(f.name); });
       listEl.appendChild(row);
     });
   }
+
+  // 图片大图预览
+  var lightbox = $('lightbox'), lbImg = $('lbImg');
+  function preview(name) {
+    lbImg.src = API + '/files/' + encodeURIComponent(name);
+    lightbox.classList.add('show');
+  }
+  $('lbClose').addEventListener('click', function () { lightbox.classList.remove('show'); });
+  lightbox.addEventListener('click', function (e) { if (e.target === lightbox) lightbox.classList.remove('show'); });
 
   function load() {
     fetch(API + '/files', { cache: 'no-store' })
@@ -255,7 +311,13 @@
       xhr.upload.onprogress = function (e) {
         if (e.lengthComputable) {
           var p = Math.round(e.loaded / e.total * 100);
-          bar.style.width = p + '%'; pct.textContent = p + '%';
+          var now = Date.now();
+          if (!item._t) { item._t = now; item._l = 0; }
+          var dt = (now - item._t) / 1000;
+          var dl = e.loaded - item._l;
+          if (dt > 0.3) { item._speed = dl / dt; item._t = now; item._l = e.loaded; }
+          var speed = item._speed ? fmtSpeed(item._speed) : '';
+          bar.style.width = p + '%'; pct.textContent = p + '%' + (speed ? ' · ' + speed : '');
         }
       };
       xhr.onload = function () {
@@ -297,6 +359,38 @@
     }
     input.value = '';
   });
+  // 文字互传
+  var clipInput = $('clipInput'), clipBox = $('clipBox'), clipTextEl = $('clipText'), clipCopy = $('clipCopy');
+  function loadClip() {
+    fetch(API + '/clipboard', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.text) {
+          clipTextEl.textContent = d.text;
+          clipBox.hidden = false;
+        } else {
+          clipBox.hidden = true;
+        }
+      })
+      .catch(function () {});
+  }
+  $('clipSend').addEventListener('click', function () {
+    var text = clipInput.value;
+    if (!text.trim()) return;
+    fetch(API + '/clipboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    }).then(function (r) {
+      if (r.ok) { clipInput.value = ''; toast('已发送到电脑'); loadClip(); }
+      else toast('发送失败');
+    }).catch(function () { toast('网络错误'); });
+  });
+  clipCopy.addEventListener('click', function () {
+    var t = clipTextEl.textContent;
+    if (navigator.clipboard && t) navigator.clipboard.writeText(t).then(function () { toast('已复制'); });
+  });
+
   $('refresh').addEventListener('click', load);
 
   // WebSocket 实时推送：收到 files_changed 立即刷新（保留 5s 轮询作兜底）
@@ -309,11 +403,15 @@
       setTimeout(connectWS, 3000);
       return;
     }
-    ws.onmessage = function () { load(); };
+    ws.onmessage = function (e) {
+      if (e.data === 'clipboard_changed') loadClip();
+      else load();
+    };
     ws.onclose = function () { setTimeout(connectWS, 3000); };
     ws.onerror = function () { try { ws.close(); } catch (e) {} };
   }
   connectWS();
+  loadClip();
   setInterval(load, 5000);
   load();
 })();

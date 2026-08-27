@@ -54,6 +54,12 @@ fn import_files(state: tauri::State<'_, AppState>, paths: Vec<String>) -> Result
 }
 
 #[tauri::command]
+fn read_clipboard() -> Option<String> {
+    let mut cb = arboard::Clipboard::new().ok()?;
+    cb.get_text().ok()
+}
+
+#[tauri::command]
 fn get_server_info(state: tauri::State<'_, AppState>) -> ServerInfo {
     let st = state.server.clone();
     let token = st.token.clone();
@@ -130,6 +136,15 @@ pub fn run() {
                             .show();
                     });
                 })),
+                clipboard: RwLock::new(None),
+                on_clipboard: Some(Arc::new(move |text: &str| {
+                    let text = text.to_string();
+                    std::thread::spawn(move || {
+                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                            let _ = cb.set_text(text);
+                        }
+                    });
+                })),
             });
             let router = build_router(server.clone());
 
@@ -165,7 +180,8 @@ pub fn run() {
             get_server_info,
             set_dir,
             open_dir,
-            import_files
+            import_files,
+            read_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

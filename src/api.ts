@@ -72,3 +72,26 @@ export function formatTime(ts: number): string {
   const p = (x: number) => (x < 10 ? '0' + x : '' + x)
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
+export interface ClipboardEntry {
+  text: string
+  updated_at: number
+}
+
+export async function getClipboard(): Promise<ClipboardEntry> {
+  const r = await fetch(`${base}/api/clipboard`, { cache: 'no-store' })
+  return (await r.json()) as ClipboardEntry
+}
+
+export async function setClipboard(text: string): Promise<void> {
+  await fetch(`${base}/api/clipboard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+}
+
+/** 读取系统剪贴板（用于电脑→手机的自动同步） */
+export async function readSystemClipboard(): Promise<string | null> {
+  return await invoke<string | null>('read_clipboard')
+}

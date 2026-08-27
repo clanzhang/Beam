@@ -6,12 +6,16 @@ import {
   deleteFile,
   formatSize,
   formatTime,
+  getClipboard,
   getServerInfo,
   importFiles,
   listFiles,
   openDir,
   pickDir,
+  readSystemClipboard,
+  setClipboard,
   setDir,
+  type ClipboardEntry,
   type FileInfo,
   type ServerInfo,
 } from './api'
@@ -24,11 +28,27 @@ const picking = ref(false)
 const busy = ref(false)
 const refreshing = ref(false)
 const dragging = ref(false)
+const searchQuery = ref('')
+const sortBy = ref<'time' | 'name' | 'size'>('time')
+
+const clipText = ref('')
+const remoteClip = ref<ClipboardEntry>({ text: '', updated_at: 0 })
+const autoSync = ref(false)
+const clipSent = ref(false)
 
 let wsConn: WebSocket | null = null
 let unlistenDrag: (() => void) | undefined
 
 const totalSize = computed(() => files.value.reduce((s, f) => s + f.size, 0))
+
+const filteredFiles = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  let list = q ? files.value.filter((f) => f.name.toLowerCase().includes(q)) : [...files.value]
+  if (sortBy.value === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+  else if (sortBy.value === 'size') list.sort((a, b) => a.size - b.size)
+  else list.sort((a, b) => b.modified - a.modified)
+  return list
+})
 const statusText = computed(() =>
   info.value ? `服务运行中 · ${info.value.lan_ip}:${info.value.port}` : '启动中…',
 )
@@ -60,6 +80,7 @@ async function init() {
   qrDataUrl.value = await QRCode.toDataURL(info.value.url, opts)
   connectWs()
   setupDragDrop()
+  loadClipboard()
   timer = window.setInterval(refresh, 5000)
 }
 
@@ -67,7 +88,10 @@ async function init() {
 function connectWs() {
   if (!info.value || wsConn) return
   const socket = new WebSocket(`ws://127.0.0.1:${info.value.port}/t/${info.value.token}/api/ws`)
-  socket.onmessage = () => refresh()
+  socket.onmessage = (e) => {
+    if (e.data === 'clipboard_changed') loadClipboard()
+    else refresh()
+  }
   socket.onclose = () => {
     wsConn = null
     setTimeout(connectWs, 3000)
@@ -143,6 +167,63 @@ function reveal() {
   if (info.value) openDir(info.value.dir)
 }
 
+async function loadClipboard() {
+  try {
+    remoteClip.value = await getClipboard()
+  } catch {
+    /* 忽略 */
+  }
+}
+
+async function sendClipText() {
+  const text = clipText.value
+  if (!text.trim()) return
+  try {
+    await setClipboard(text)
+    clipSent.value = true
+    setTimeout(() => (clipSent.value = false), 1500)
+    clipText.value = ''
+    await loadClipboard()
+  } catch {
+    /* 忽略 */
+  }
+}
+
+async function copyRemoteClip() {
+  if (!remoteClip.value.text) return
+  try {
+    await navigator.clipboard.writeText(remoteClip.value.text)
+  } catch {
+    /* 忽略 */
+  }
+}
+
+let clipTimer: number | undefined
+let lastSystemClip = ''
+// 开启自动同步后：每 2s 读取系统剪贴板，有变化就推到共享端
+function syncSystemClipboard() {
+  if (!autoSync.value) {
+    if (clipTimer) {
+      window.clearInterval(clipTimer)
+      clipTimer = undefined
+    }
+    return
+  }
+  if (clipTimer) return
+  clipTimer = window.setInterval(async () => {
+    try {
+      const text = await readSystemClipboard()
+      if (text != null && text !== lastSystemClip && text.trim()) {
+        lastSystemClip = text
+        await setClipboard(text)
+        await loadClipboard()
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }, 2000)
+}
+
 function fileTint(name: string): string {
   const ext = (name.split('.').pop() || '').toLowerCase()
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'].includes(ext)) return 'bg-cyan-500/10 text-cyan-300'
@@ -168,9 +249,12 @@ function fileIcon(name: string): string {
   return map[ext] || '📦'
 }
 
-onMounted(init)
+onMounted(() => {
+  init()
+})
 onUnmounted(() => {
   if (timer) window.clearInterval(timer)
+  if (clipTimer) window.clearInterval(clipTimer)
   unlistenDrag?.()
   wsConn?.close()
 })
@@ -263,6 +347,41 @@ onUnmounted(() => {
         </div>
 
         <div class="rounded-2xl border border-[#334155] bg-[#0f172a] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.35)]">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-slate-700/40 grid place-items-center text-sm">📋</span> 文字互传
+            </h3>
+            <label class="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
+              <input v-model="autoSync" type="checkbox" class="accent-amber-500" @change="syncSystemClipboard" />
+              自动同步电脑剪贴板
+            </label>
+          </div>
+          <div class="flex items-start gap-2">
+            <textarea
+              v-model="clipText"
+              rows="2"
+              placeholder="粘贴文字，发送到手机…"
+              class="flex-1 text-xs text-slate-300 bg-[#0a0f1d] border border-[#334155] rounded-lg px-3 py-2 resize-none outline-none focus:border-amber-400/60 transition-colors"
+            ></textarea>
+            <button class="btn btn-primary" :disabled="!clipText.trim()" @click="sendClipText">
+              {{ clipSent ? '✓ 已发送' : '发送' }}
+            </button>
+          </div>
+          <div
+            v-if="remoteClip.text"
+            class="mt-3 flex items-start gap-2 bg-[#0a0f1d] border border-[#334155] rounded-lg px-3 py-2"
+          >
+            <p class="flex-1 text-xs text-slate-300 break-all leading-5 max-h-24 overflow-y-auto whitespace-pre-wrap">
+              {{ remoteClip.text }}
+            </p>
+            <button class="btn btn-ghost shrink-0" @click="copyRemoteClip">复制</button>
+          </div>
+          <p v-else class="mt-3 text-[11px] text-slate-600">
+            手机发来的文字会显示在这里；开启自动同步后，电脑复制的文字会实时推到手机。
+          </p>
+        </div>
+
+        <div class="rounded-2xl border border-[#334155] bg-[#0f172a] p-5 shadow-[0_16px_40px_rgba(0,0,0,0.35)]">
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
               <span class="w-7 h-7 rounded-lg bg-slate-700/40 grid place-items-center text-sm">🗂️</span> 已收文件
@@ -270,20 +389,38 @@ onUnmounted(() => {
                 {{ files.length ? `${files.length} 个 · 共 ${formatSize(totalSize)}` : '' }}
               </span>
             </h3>
-            <button class="btn btn-ghost" @click="doRefresh" :disabled="refreshing">
-              <span class="i-ri-refresh-line text-sm" :class="refreshing ? 'animate-spin' : ''"></span>
-              刷新
-            </button>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="searchQuery"
+                placeholder="🔍 搜索文件…"
+                class="w-36 text-xs text-slate-300 bg-[#0a0f1d] border border-[#334155] rounded-lg px-2.5 py-1.5 outline-none focus:border-amber-400/60 transition-colors placeholder:text-slate-600"
+              />
+              <select
+                v-model="sortBy"
+                class="text-xs text-slate-300 bg-[#0a0f1d] border border-[#334155] rounded-lg px-2 py-1.5 outline-none cursor-pointer"
+              >
+                <option value="time">最新</option>
+                <option value="name">名称</option>
+                <option value="size">大小</option>
+              </select>
+              <button class="btn btn-ghost" @click="doRefresh" :disabled="refreshing">
+                <span class="i-ri-refresh-line text-sm" :class="refreshing ? 'animate-spin' : ''"></span>
+                刷新
+              </button>
+            </div>
           </div>
 
           <div v-if="files.length === 0" class="py-14 text-center">
             <div class="text-4xl mb-3">📭</div>
             <p class="text-sm text-slate-500">还没有文件，用手机扫左侧二维码传一个过来吧</p>
           </div>
+          <div v-else-if="filteredFiles.length === 0" class="py-10 text-center">
+            <p class="text-sm text-slate-500">没有匹配「{{ searchQuery }}」的文件</p>
+          </div>
 
           <ul v-else class="divide-y divide-[#1f2b40]">
             <li
-              v-for="f in files"
+              v-for="f in filteredFiles"
               :key="f.name"
               class="group flex items-center gap-3 py-3 px-2 -mx-2 rounded-lg hover:bg-white/[0.03] transition-colors"
             >
