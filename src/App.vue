@@ -40,7 +40,8 @@ async function refresh() {
 async function doRefresh() {
   refreshing.value = true
   try {
-    await refresh()
+    // 至少 0.5s 的 loading 反馈，刷新完成后自动停止
+    await Promise.all([refresh(), new Promise((r) => setTimeout(r, 500))])
   } finally {
     refreshing.value = false
   }
@@ -233,7 +234,7 @@ onUnmounted(() => {
           </div>
 
           <ul v-else class="divide-y divide-[#F0E9E1]">
-            <li v-for="f in files" :key="f.name" class="group flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-xl hover:bg-[#FBF6F2] transition-colors">
+            <li v-for="f in files" :key="f.name" class="group flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-xl hover:bg-white/[0.02] transition-colors">
               <div
                 class="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0 border border-white shadow-sm"
                 :class="fileTint(f.name)"
