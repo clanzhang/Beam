@@ -235,7 +235,7 @@ onUnmounted(() => {
             <li
               v-for="f in files"
               :key="f.name"
-              class="group flex items-center gap-3 py-3 px-2 rounded-lg hover:bg-white/[0.03] transition-colors"
+              class="group flex items-center gap-3 py-3 px-2 -mx-2 rounded-lg hover:bg-white/[0.03] transition-colors"
             >
               <div
                 class="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0"
@@ -248,7 +248,7 @@ onUnmounted(() => {
                 <p class="text-[11px] text-slate-500 mt-0.5">{{ formatSize(f.size) }} · {{ formatTime(f.modified) }}</p>
               </div>
               <button
-                class="btn btn-danger opacity-40 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity ml-2"
+                class="btn btn-danger opacity-50 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-150 ml-auto"
                 :disabled="busy"
                 @click="remove(f.name)"
                 title="删除"
