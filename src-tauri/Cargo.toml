@@ -1,6 +1,6 @@
 [package]
 name = "airbox"
-version = "0.1.1"
+version = "0.1.2"
 description = "AirBox - 手机电脑局域网互传文件"
 authors = ["clanzhang"]
 edition = "2021"
