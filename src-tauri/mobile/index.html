@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0b1220">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <title>AirBox 快传</title>
 <style>
   :root {
@@ -191,7 +192,7 @@
     var ext = (name.split('.').pop() || '').toLowerCase();
     var map = { jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', webp: '🖼️', heic: '🖼️',
       mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬', mp3: '🎵', wav: '🎵', m4a: '🎵',
-      zip: '🗜️', rar: '🗜️', 7z: '🗜️', pdf: '📄', doc: '📝', docx: '📝', xls: '📊',
+      zip: '🗜️', rar: '🗜️', '7z': '🗜️', pdf: '📄', doc: '📝', docx: '📝', xls: '📊',
       xlsx: '📊', ppt: '📽️', pptx: '📽️', txt: '📃', md: '📃' };
     return map[ext] || '📦';
   }

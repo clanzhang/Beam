@@ -105,7 +105,10 @@ async fn gateway_inner(st: &Arc<ServerState>, token: String, rest: &str, req: Re
 
 fn mobile_page() -> Response {
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
+        ],
         include_str!("../mobile/index.html"),
     )
         .into_response()
