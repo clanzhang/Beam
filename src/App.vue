@@ -259,8 +259,9 @@ onUnmounted(() => {
                 class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-500 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
                 :disabled="busy"
                 @click="remove(f.name)"
+                title="删除"
               >
-                删除
+                <span class="i-ri-delete-bin-5-line text-base"></span>
               </button>
             </li>
           </ul>

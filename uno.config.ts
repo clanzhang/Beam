@@ -1,7 +1,16 @@
-import { defineConfig, presetUno, transformerDirectives, transformerVariantGroup } from 'unocss'
+import { defineConfig, presetIcons, presetUno, transformerDirectives, transformerVariantGroup } from 'unocss'
 
 export default defineConfig({
-  presets: [presetUno()],
+  presets: [
+    presetUno(),
+    presetIcons({
+      scale: 1.2,
+      warn: true,
+      collections: {
+        ri: () => import('@iconify-json/ri/icons.json').then((m) => m.default as any),
+      },
+    }),
+  ],
   transformers: [transformerDirectives(), transformerVariantGroup()],
   shortcuts: {
     'btn': 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed',
