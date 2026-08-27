@@ -244,7 +244,7 @@ onUnmounted(() => {
           </div>
 
           <ul v-else class="divide-y divide-slate-100">
-            <li v-for="f in files" :key="f.name" class="flex items-center gap-3 py-3">
+            <li v-for="f in files" :key="f.name" class="group flex items-center gap-3 py-3">
               <div
                 class="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0 border border-white/80 shadow-sm"
                 :class="fileTint(f.name)"
@@ -256,7 +256,7 @@ onUnmounted(() => {
                 <p class="text-[11px] text-slate-400 mt-0.5">{{ formatSize(f.size) }} · {{ formatTime(f.modified) }}</p>
               </div>
               <button
-                class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-500 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
+                class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-500 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97] transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
                 :disabled="busy"
                 @click="remove(f.name)"
                 title="删除"
