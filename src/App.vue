@@ -20,6 +20,7 @@ const qrDataUrl = ref('')
 const copied = ref(false)
 const picking = ref(false)
 const busy = ref(false)
+const refreshing = ref(false)
 
 const totalSize = computed(() => files.value.reduce((s, f) => s + f.size, 0))
 const statusText = computed(() =>
@@ -33,6 +34,15 @@ async function refresh() {
     files.value = await listFiles()
   } catch {
     /* 服务偶发抖动不打扰用户 */
+  }
+}
+
+async function doRefresh() {
+  refreshing.value = true
+  try {
+    await refresh()
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -174,11 +184,7 @@ onUnmounted(() => {
             >
               {{ info?.url || '…' }}
             </code>
-            <button
-              class="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-2xl text-sm font-semibold text-white bg-[#D17159] hover:bg-[#C06047] active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="!info"
-              @click="copyUrl"
-            >
+            <button class="shrink-0 btn btn-primary px-5" :disabled="!info" @click="copyUrl">
               {{ copied ? '✓ 已复制' : '复制' }}
             </button>
           </div>
@@ -196,20 +202,10 @@ onUnmounted(() => {
               <span class="w-7 h-7 rounded-lg bg-[#F6E3DD] grid place-items-center text-sm">📂</span> 收件目录
             </h3>
             <div class="flex gap-2">
-              <button
-                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl text-sm font-medium text-[#3E3E42] bg-white border border-[#E3D9CF] hover:bg-[#FBF6F2] hover:border-[#D5C4B5] active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
-                @click="chooseDir"
-                :disabled="picking"
-              >
+              <button class="btn btn-outline" @click="chooseDir" :disabled="picking">
                 {{ picking ? '选择中…' : '选择目录' }}
               </button>
-              <button
-                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl text-sm font-medium text-[#3E3E42] bg-white border border-[#E3D9CF] hover:bg-[#FBF6F2] hover:border-[#D5C4B5] active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
-                @click="reveal"
-                :disabled="!info"
-              >
-                打开目录
-              </button>
+              <button class="btn btn-primary" @click="reveal" :disabled="!info">打开目录</button>
             </div>
           </div>
           <p class="text-xs text-[#6E6863] bg-[#FBF6F2] border border-[#EEE5DC] rounded-xl px-3 py-2.5 truncate">
@@ -225,11 +221,9 @@ onUnmounted(() => {
                 {{ files.length ? `${files.length} 个 · 共 ${formatSize(totalSize)}` : '' }}
               </span>
             </h3>
-            <button
-              class="inline-flex items-center justify-center gap-1 px-3.5 py-2 rounded-2xl text-xs font-medium text-[#3E3E42] bg-white border border-[#E3D9CF] hover:bg-[#FBF6F2] hover:border-[#D5C4B5] active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset]"
-              @click="refresh"
-            >
-              ⟳ 刷新
+            <button class="btn btn-ghost" @click="doRefresh" :disabled="refreshing">
+              <span class="i-ri-refresh-line text-sm" :class="refreshing ? 'animate-spin' : ''"></span>
+              刷新
             </button>
           </div>
 
@@ -239,7 +233,7 @@ onUnmounted(() => {
           </div>
 
           <ul v-else class="divide-y divide-[#F0E9E1]">
-            <li v-for="f in files" :key="f.name" class="group flex items-center gap-3 py-3">
+            <li v-for="f in files" :key="f.name" class="group flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-xl hover:bg-[#FBF6F2] transition-colors">
               <div
                 class="w-10 h-10 rounded-xl grid place-items-center text-lg shrink-0 border border-white shadow-sm"
                 :class="fileTint(f.name)"
@@ -251,7 +245,7 @@ onUnmounted(() => {
                 <p class="text-[11px] text-[#A69E97] mt-0.5">{{ formatSize(f.size) }} · {{ formatTime(f.modified) }}</p>
               </div>
               <button
-                class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-[#C06047] bg-white border border-[#E8C4B8] hover:bg-[#F6E3DD] hover:border-[#DBAA98] active:scale-[0.97] transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
+                class="btn btn-danger opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                 :disabled="busy"
                 @click="remove(f.name)"
                 title="删除"
