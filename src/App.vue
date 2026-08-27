@@ -176,7 +176,7 @@ onUnmounted(() => {
               {{ info?.url || '…' }}
             </code>
             <button
-              class="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 active:scale-[0.97] transition-all shadow-sm shadow-indigo-600/25 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50 disabled:cursor-not-allowed"
               :disabled="!info"
               @click="copyUrl"
             >
@@ -200,14 +200,14 @@ onUnmounted(() => {
             </h3>
             <div class="flex gap-2">
               <button
-                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all disabled:opacity-50"
+                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
                 @click="chooseDir"
                 :disabled="picking"
               >
                 {{ picking ? '选择中…' : '选择目录' }}
               </button>
               <button
-                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all disabled:opacity-50"
+                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
                 @click="reveal"
                 :disabled="!info"
               >
@@ -231,7 +231,7 @@ onUnmounted(() => {
               </span>
             </h3>
             <button
-              class="inline-flex items-center justify-center gap-1 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all"
+              class="inline-flex items-center justify-center gap-1 px-3.5 py-2 rounded-2xl text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset]"
               @click="refresh"
             >
               ⟳ 刷新
@@ -256,7 +256,7 @@ onUnmounted(() => {
                 <p class="text-[11px] text-slate-400 mt-0.5">{{ formatSize(f.size) }} · {{ formatTime(f.modified) }}</p>
               </div>
               <button
-                class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-500 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97] transition-all disabled:opacity-50"
+                class="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-500 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 active:scale-[0.97] transition-all shadow-[rgba(50,50,93,0.25)_0px_50px_100px_-20px,rgba(0,0,0,0.3)_0px_30px_60px_-30px,rgba(10,37,64,0.35)_0px_-2px_6px_0px_inset] disabled:opacity-50"
                 :disabled="busy"
                 @click="remove(f.name)"
               >
